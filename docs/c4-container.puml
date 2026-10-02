@@ -1,0 +1,74 @@
+@startuml marketplace-container
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+LAYOUT_TOP_DOWN()
+HIDE_STEREOTYPE()
+
+title Маркетплейс: диаграмма контейнеров (C4)
+
+Person(buyer, "Покупатель", "Смотрит ленту, оформляет и оплачивает заказы")
+Person(seller, "Продавец", "Заводит товары, меняет цены и остатки")
+
+Boundary(mp, "Маркетплейс", "система") {
+    Container(web, "Веб-приложение", "React", "Интерфейс для покупателя и продавца")
+    Container(gw, "API-шлюз", "Envoy", "Единая точка входа, проверка JWT, маршрутизация запросов")
+
+    Container(auth, "Сервис пользователей", "Python, FastAPI", "Регистрация, вход, роли, выдача JWT")
+    ContainerDb(authdb, "БД пользователей", "PostgreSQL", "Пользователи, хеши паролей, роли, контакты")
+
+    Container(catalog, "Сервис каталога", "Python, FastAPI", "Товары, категории, цены, остатки, резерв под заказ")
+    ContainerDb(catalogdb, "БД каталога", "PostgreSQL", "Товары, цены, остатки, резервы")
+
+    Container(feed, "Сервис ленты", "Python, FastAPI", "Персональная лента по правилам")
+    ContainerDb(feeddb, "БД ленты", "PostgreSQL", "Копия карточек, популярность, интересы покупателя")
+    ContainerDb(feedcache, "Кэш ленты", "Redis", "Готовые первые страницы ленты, хранятся 5 минут")
+
+    Container(order, "Сервис заказов", "Python, FastAPI", "Корзина, оформление заказа, статусы. Единственный запущенный сервис")
+    ContainerDb(orderdb, "БД заказов", "PostgreSQL", "Корзины, заказы, позиции с ценой на момент покупки")
+
+    Container(payment, "Сервис платежей", "Python, FastAPI", "Платежи и возвраты, работа с платежным провайдером")
+    ContainerDb(paymentdb, "БД платежей", "PostgreSQL", "Платежи, возвраты, ключи идемпотентности")
+
+    Container(notify, "Сервис уведомлений", "Python, FastAPI", "Письма и пуши о смене статуса заказа")
+    ContainerDb(notifydb, "БД уведомлений", "PostgreSQL", "Шаблоны, журнал отправок")
+
+    ContainerQueue(kafka, "Брокер событий", "Kafka", "Топики событий каталога, заказов и платежей")
+}
+
+System_Ext(psp, "Платежный провайдер", "Списание и возврат денег")
+System_Ext(sender, "Провайдер рассылок", "Доставка писем и пушей")
+
+Rel(buyer, web, "Использует", "HTTPS")
+Rel(seller, web, "Использует", "HTTPS")
+Rel(web, gw, "Запросы к API", "HTTPS, JSON")
+
+Rel(gw, auth, "Регистрация, вход, профиль", "HTTP, синхронно")
+Rel(gw, catalog, "Управление товарами", "HTTP, синхронно")
+Rel(gw, feed, "Получить ленту", "HTTP, синхронно")
+Rel(gw, order, "Корзина, оформление, статус заказа", "HTTP, синхронно")
+Rel(psp, gw, "Результат оплаты", "HTTPS")
+Rel(gw, payment, "Результат оплаты от провайдера", "HTTP, синхронно")
+
+Rel(order, catalog, "Актуальная цена и резерв остатка", "HTTP, синхронно")
+Rel(order, payment, "Создать платеж, получить ссылку на оплату", "HTTP, синхронно")
+Rel(payment, psp, "Провести платеж или возврат", "HTTPS, синхронно")
+Rel(notify, auth, "Email и пуш-токен получателя", "HTTP, синхронно")
+Rel(notify, sender, "Отправить письмо или пуш", "HTTPS, синхронно")
+
+Rel(auth, authdb, "Чтение и запись", "SQL")
+Rel(catalog, catalogdb, "Чтение и запись", "SQL")
+Rel(feed, feeddb, "Чтение и запись", "SQL")
+Rel(feed, feedcache, "Чтение и запись", "Redis")
+Rel(order, orderdb, "Чтение и запись", "SQL")
+Rel(payment, paymentdb, "Чтение и запись", "SQL")
+Rel(notify, notifydb, "Чтение и запись", "SQL")
+
+Rel(catalog, kafka, "Товар изменился", "Kafka, асинхронно")
+Rel(order, kafka, "Статус заказа изменился", "Kafka, асинхронно")
+Rel(payment, kafka, "Оплата прошла или нет", "Kafka, асинхронно")
+Rel(kafka, feed, "Изменения товаров, завершенные заказы", "Kafka, асинхронно")
+Rel(kafka, order, "Результат оплаты", "Kafka, асинхронно")
+Rel(kafka, catalog, "Статус заказа (списать или снять резерв)", "Kafka, асинхронно")
+Rel(kafka, notify, "Статус заказа изменился", "Kafka, асинхронно")
+
+@enduml
